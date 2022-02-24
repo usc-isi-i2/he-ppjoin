@@ -1,66 +1,57 @@
 #include "palisade.h"
+#include "csvstream.h"
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <map>
 #include <math.h> 
+#include <stdio.h>
+#include <string.h>
 
 using namespace std;
 using namespace lbcrypto;
 
-vector<vector<string>> format_bigrams (string file_to_read) {
-	ifstream file ("../heppjoin/" + file_to_read, ios::out);
-	vector<vector<string>> bigrams;
+//cite: https://www.techiedelight.com/split-string-cpp-using-delimiter/
+void tokenize(std::string const &str, const char delim, std::vector<int> &out) {
+    size_t start;
+    size_t end = 0;
+ 
+    while ((start = str.find_first_not_of(delim, end)) != std::string::npos)
+    {
+        end = str.find(delim, start);
+        out.push_back(stoi(str.substr(start, end - start)));
+    }
+}
 
-	if (file.is_open()) {
-		string line = "";
-		while (getline(file, line, '\n')) {
-			stringstream ss(line);
-			vector<string> result;
-			int idx = 0;
-			while (ss.good()) {
-				string substr;
-				getline(ss, substr, ',');
+vector<vector<int>> read_in_data (string file_to_read, vector<int> &ids) {
+	csvstream csvin("../test_data/" + file_to_read);
+	vector<vector<int>> token_set;
+	map<string, string> row;
 
-				if (substr.length() == 1) {
-					if (idx == 0) {
-						substr = " " + substr;
-					} else {
-						substr = substr + " ";
-					}
-				}
-				result.push_back(substr);
-				idx++;
-			}
-			bigrams.push_back(result);
-		}
+	while (csvin >> row) {
+		string id = row["id"];
+		string data = row["tokens"];
+		data = data.substr(1, data.size() - 2);
 
+		vector<int> tokens;
+		ids.push_back(stoi(id));
+		const char delim = ',';
+		tokenize(data, delim, tokens);
+		token_set.push_back(tokens);
 	} 
 
-	return bigrams;
+	return token_set;
 }
 
-int convert_to_ascii (string str) {
-	stringstream ss;
-	for (int i = 0; i < str.length(); i++) {
-		char c = str.at(i);
-		ss << hex << int(c);
-	}
-
-	int x;
-	ss >> x;
-	return x;
-}
-
-map<string, int> get_local_ordering_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp2, vector<vector<string>> tokens, map<string, Ciphertext<DCRTPoly>> &encrypted_tokens, vector<vector<Ciphertext<DCRTPoly>>> &enc_records) {
-	map<string, int> freq;
-
+map<int, int> get_local_ordering_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp2, vector<vector<int>> tokens, map<int, Ciphertext<DCRTPoly>> &encrypted_tokens, vector<vector<Ciphertext<DCRTPoly>>> &enc_records) {
+	map<int, int> freq;
+	#pragma omp for
 	for (int i = 0; i < tokens.size(); i++) {
 		vector<Ciphertext<DCRTPoly>> rec;
 		for (int j = 0; j < tokens[i].size(); j++) {
 
-			vector<double> t = {(double) convert_to_ascii(tokens[i][j])};
-			Plaintext p = cc->MakeCKKSPackedPlaintext(t);
+			vector<int64_t> t = {tokens[i][j]};
+			Plaintext p = cc->MakePackedPlaintext(t);
 			Ciphertext<DCRTPoly> c = cc->Encrypt(kp2.publicKey, p);
 			rec.push_back(c);
 			encrypted_tokens[tokens[i][j]] = c;
@@ -80,15 +71,14 @@ map<string, int> get_local_ordering_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<
 }
 
 
-
 bool sort_enc_pairs (pair<Ciphertext<DCRTPoly>, int> &a, pair<Ciphertext<DCRTPoly>, int> &b) {
 	return (a.second < b.second);
 }
 
-vector<pair<Ciphertext<DCRTPoly>, int>> encrypt_local_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp2, map<string, int> freq, map<string, Ciphertext<DCRTPoly>> enc_map) {
+vector<pair<Ciphertext<DCRTPoly>, int>> encrypt_local_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp2, map<int, int> freq, map<int, Ciphertext<DCRTPoly>> enc_map) {
 	vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq;
 
-	map<string, int>::iterator it;
+	map<int, int>::iterator it;
 	for (it = freq.begin(); it != freq.end(); it++) {
 		Ciphertext<DCRTPoly> c = enc_map[it->first];
 		pair<Ciphertext<DCRTPoly>, int> enc;
@@ -103,8 +93,7 @@ vector<pair<Ciphertext<DCRTPoly>, int>> encrypt_local_freq (CryptoContext<DCRTPo
 
 bool is_a_match (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, Plaintext decryptResult, Ciphertext<DCRTPoly> cipher) {
     cc->Decrypt(kpMultiparty.secretKey, cipher, &decryptResult);
-    if (decryptResult->GetCKKSPackedValue()[0].real() <= 0.0005 &&
-          decryptResult->GetCKKSPackedValue()[0].real() >= -0.0005) {
+    if (decryptResult->GetPackedValue()[0] == 0) {
     	return true;
     } else {
     	return false;
@@ -112,17 +101,40 @@ bool is_a_match (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, P
     
 }
 
+int private_set_intersection (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<Ciphertext<DCRTPoly>> x, vector<Ciphertext<DCRTPoly>> y) {
+	int _x_= x.size();
+	int _y_ = y.size(); 
+
+	Plaintext decryptResult;
+	int count = 0;
+	#pragma omp for
+	for (int i = 0; i < _x_; i++) {
+		for (int j = 0; j < _y_; j++) {
+			auto sub = cc->EvalSub(x[i], y[j]);
+			if (is_a_match(cc, kpMultiparty, decryptResult, sub)) {
+				count += 1;
+			}
+		}
+	}
+
+	return count;
+
+}
+
 vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq_join (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq1, vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq2) {
 	vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq;
 	set<int> idx;
 	set<int> jdx;
 
+	#pragma omp for
 	for (int i = 0; i < enc_freq1.size(); ++i) 
-    idx.insert(idx.end(), i);
+    	idx.insert(idx.end(), i);
 
-  for (int j = 0; j < enc_freq2.size(); ++j) 
-  	jdx.insert(jdx.end(), j);
+  #pragma omp for
+	for (int j = 0; j < enc_freq2.size(); ++j) 
+		jdx.insert(jdx.end(), j);
 
+  #pragma omp for
 	for (int i = 0; i < enc_freq1.size(); i++) {
 		for (int j = 0; j < enc_freq2.size(); j++) {
 			pair<Ciphertext<DCRTPoly>, int> p1 = enc_freq1[i];
@@ -153,26 +165,12 @@ vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq_join (CryptoContext<DCRTPoly> c
 
 }
 
-vector<int> get_prefix_lengths (vector<vector<Ciphertext<DCRTPoly>>> global_enc_recs, double t) {
-	vector<int> prefixes;
-	for (int i = 0; i < global_enc_recs.size(); i++) {
-		int x = global_enc_recs[i].size();
-		double temp = ceil((1 - t) * x);
-		int pref = int(temp + 1);
-		prefixes.push_back(pref);
-	}
-
-	return prefixes;
-}
-
-
-int get_token_count (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> map, Ciphertext<DCRTPoly> c) {
-
+int get_token_pos (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> map, Ciphertext<DCRTPoly> c) {
 	for (int i = 0; i < map.size(); i++) {
 		auto sub = cc->EvalSub(map[i].first, c);
 		Plaintext decryptResult;
 		if (is_a_match(cc, kpMultiparty, decryptResult, sub)) {
-			return map[i].second;
+			return i;
 		}
 	}
 
@@ -180,38 +178,40 @@ int get_token_count (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultipart
 }
 
 bool compareRecs(pair<Ciphertext<DCRTPoly>, int> p1, pair<Ciphertext<DCRTPoly>, int> p2) {
-    return (p1.second <= p2.second);
-}
-
-bool compareGlobal(pair<vector<Ciphertext<DCRTPoly>>, int> p1, pair<vector<Ciphertext<DCRTPoly>>, int> p2) {
-    return (p1.second <= p2.second);
+    return (p1.second < p2.second);
 }
 
 void sort_rec (vector<pair<Ciphertext<DCRTPoly>, int>> &rec) {
 	sort(rec.begin(), rec.end(), compareRecs);
 }
 
-void sort_global (vector<pair<vector<Ciphertext<DCRTPoly>>, int>> &global) {
-	sort(global.begin(), global.end(), compareGlobal);
+void sort_global (vector<pair<vector<Ciphertext<DCRTPoly>>, int>> &global, map<int, int> &rid_mapping) {
+	#pragma omp for
+	for (int idx = 0; idx < global.size(); idx++) {
+		int min = 0;
+		for (int jdx = 1; jdx < global.size(); jdx++) {
+			if (global[min].second > global[jdx].second) {
+				min = jdx;
+			}
+		}
+		rid_mapping[idx] = min;
+		global[min].second = INT_MAX;
+	}
+
 }
 
 
-CryptoContext<DCRTPoly> gen_crypto_context (int init_size, int dcrtBits, int batch_size) {
+CryptoContext<DCRTPoly> gen_crypto_context (int plaintextModulus, double sigma, int depth) {
 
-	CryptoContext<DCRTPoly> cc =
-      CryptoContextFactory<DCRTPoly>::genCryptoContextCKKS(
-          init_size - 1, dcrtBits, batch_size, HEStd_128_classic,
-          0,                    /*ringDimension*/
-          APPROXRESCALE, BV, 1, /*numLargeDigits*/
-          1,                    /*maxDepth*/
-          60,                   /*firstMod*/
-          5, OPTIMIZED);
+	// Instantiate the BGVrns crypto context
+  CryptoContext<DCRTPoly> cc =
+      CryptoContextFactory<DCRTPoly>::genCryptoContextBGVrns(
+          depth, plaintextModulus, HEStd_128_classic, sigma, depth, OPTIMIZED, BV);
 
-	  // enable features that you wish to use
-	  cc->Enable(ENCRYPTION);
-	  cc->Enable(SHE);
-	  cc->Enable(LEVELEDSHE);
-	  cc->Enable(MULTIPARTY);
+  // enable features that you wish to use
+  cc->Enable(ENCRYPTION);
+  cc->Enable(SHE);
+  cc->Enable(MULTIPARTY);
 
 	return cc;
 

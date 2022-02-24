@@ -1,35 +1,18 @@
 #include "palisade.h"
 #include "utility.h"
 
-double t = 0.8; //global var --> similarity threshold
-
-//true if passes length filter check, false otherwise
-bool length_filter (int x, int y) {
-	if (x < ceil(t * y)) { //don't compare x against y + longer recs
-		return false;
-	} else {
-		return true;
-	}
-}
-
-//true if passes prefix filter check, false otherwise
-bool prefix_filter (int x, int y, int overlap) {
-	if (overlap >= ceil((t / 1 + t) * (x + y))) { //overlap greater, should compare x with y
-		return true;
-	} else {
-		return false;
-	}
-}
+double t = 0.5; //global var --> similarity threshold
 
 int main(int argc, char** argv) {
 
 	auto start = std::chrono::high_resolution_clock::now();
-	cout << "- gen crypto context (1)" << endl;
-	int init_size = 1;
-	int dcrtBits = 40;
-	int batch_size = 16;
+	cout << "- local pre-processing" << endl;
 
-	CryptoContext<DCRTPoly> cc = gen_crypto_context(init_size, dcrtBits, batch_size);
+	int plaintextModulus = 65537;
+	double sigma = 3.2;
+	int depth = 1;
+
+	CryptoContext<DCRTPoly> cc = gen_crypto_context(plaintextModulus, sigma, depth);
 
 	LPKeyPair<DCRTPoly> kp1;
  	LPKeyPair<DCRTPoly> kp2;
@@ -44,170 +27,183 @@ int main(int argc, char** argv) {
   	kpMultiparty = cc->MultipartyKeyGen(secretKeys);
   	gen_multiparty_keys(cc, kp1, kp2, kpMultiparty);
 
-  	auto stop = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> duration = stop - start;
-    cout << duration.count() << endl;
-
-	start = std::chrono::high_resolution_clock::now();
-  	cout << "- local bigram tokenization + local doc freq (2)" << endl;
-	vector<vector<string>> p1 = format_bigrams ("p1_tokens.txt");
+  	vector<int> p1_ids;
+	vector<vector<int>> p1 = read_in_data ("ds1_output_0.5.csv", p1_ids);
 	vector<vector<Ciphertext<DCRTPoly>>>  p1_enc_recs;
 
-	vector<vector<string>> p2 = format_bigrams ("p2_tokens.txt");
+	vector<int> p2_ids;
+	vector<vector<int>> p2 = read_in_data ("ds2_output_0.5.csv", p2_ids);
 	vector<vector<Ciphertext<DCRTPoly>>>  p2_enc_recs;
 
-	map<string, Ciphertext<DCRTPoly>> p1_enc_map;
-	map<string, Ciphertext<DCRTPoly>> p2_enc_map;
+	map<int, Ciphertext<DCRTPoly>> p1_enc_map;
+	map<int, Ciphertext<DCRTPoly>> p2_enc_map;
 
-	map<string, int> p1_local_freq = get_local_ordering_freq (cc, kp2, p1, p1_enc_map, p1_enc_recs);
+	map<int, int> p1_local_freq = get_local_ordering_freq (cc, kp2, p1, p1_enc_map, p1_enc_recs);
 	vector<pair<Ciphertext<DCRTPoly>, int>> p1_enc_freq = encrypt_local_freq (cc, kp2, p1_local_freq, p1_enc_map);
 
-	map<string, int> p2_local_freq = get_local_ordering_freq (cc, kp2, p2, p2_enc_map, p2_enc_recs);
+	map<int, int> p2_local_freq = get_local_ordering_freq (cc, kp2, p2, p2_enc_map, p2_enc_recs);
 	vector<pair<Ciphertext<DCRTPoly>, int>> p2_enc_freq = encrypt_local_freq (cc, kp2, p2_local_freq, p2_enc_map);
 
-	cout << "P1 local enc doc. freq map: " << endl;
-	for (int i = 0; i < p1_enc_freq.size(); i++) {
-		 Plaintext decryptResult;
-      	 cc->Decrypt(kpMultiparty.secretKey, p1_enc_freq[i].first, &decryptResult);
-      	 cout << decryptResult->GetCKKSPackedValue()[0].real() << ": " << p1_enc_freq[i].second << endl;
-	}
-
-	cout << "P2 local enc doc. freq map: " << endl;
-	for (int i = 0; i < p2_enc_freq.size(); i++) {
-		Plaintext decryptResult;
-      	cc->Decrypt(kpMultiparty.secretKey, p2_enc_freq[i].first, &decryptResult);
-      	cout << decryptResult->GetCKKSPackedValue()[0].real() << ": " << p2_enc_freq[i].second << endl;
-	}
-
-	stop = std::chrono::high_resolution_clock::now();
-    duration = stop - start;
-    cout << duration.count() << endl;
+	auto stop = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration = stop - start;
+    cout << duration.count()  << " ms" << endl;
 
     start = std::chrono::high_resolution_clock::now();
-	cout << "- coalescing doc freq on third party (3)" << endl;
+	cout << "- global pre-processing" << endl;
 	vector<pair<Ciphertext<DCRTPoly>, int>> global_enc_freq = doc_freq_join (cc, kpMultiparty, p1_enc_freq, p2_enc_freq);
 
-	cout << "Global doc. freq map: " << endl;
-	for (int i = 0; i < global_enc_freq.size(); i++) {
-		Plaintext decryptResult;
-      	cc->Decrypt(kpMultiparty.secretKey, global_enc_freq[i].first, &decryptResult);
-      	cout << decryptResult->GetCKKSPackedValue()[0].real() << ": " << global_enc_freq[i].second << endl;
-	}
-
-	stop = std::chrono::high_resolution_clock::now();
-    duration = stop - start;
-    cout << duration.count() << endl;
-
-    start = std::chrono::high_resolution_clock::now();
-	cout << "- reordering global doc freq table (4)" << endl;
 	map<int, vector<Ciphertext<DCRTPoly>>> id_mapping;
 
 	vector<vector<Ciphertext<DCRTPoly>>> global_enc_recs = p1_enc_recs;
 	global_enc_recs.insert(global_enc_recs.end(), p2_enc_recs.begin(), p2_enc_recs.end());
 
 	for (int i = 0; i < global_enc_recs.size(); i++) {
-		vector<pair<Ciphertext<DCRTPoly>, int>> counts;
+		vector<pair<Ciphertext<DCRTPoly>, int>> positions;
 		for (int j = 0; j < global_enc_recs[i].size(); j++) {
-			int count = get_token_count(cc, kpMultiparty, global_enc_freq, global_enc_recs[i][j]);
-			counts.push_back(make_pair(global_enc_recs[i][j], count));
+			int pos = get_token_pos(cc, kpMultiparty, global_enc_freq, global_enc_recs[i][j]);
+			positions.push_back(make_pair(global_enc_recs[i][j], pos));
 		}
 
-		sort_rec(counts);
+		sort_rec(positions);
 
-		for (int k = 0; k < counts.size(); k++) {
-			global_enc_recs[i][k] = counts[k].first;
+		for (int k = 0; k < positions.size(); k++) {
+			global_enc_recs[i][k] = positions[k].first;
 		}
 
 		id_mapping[i] = global_enc_recs[i];
 	}
 
-	stop = std::chrono::high_resolution_clock::now();
-    duration = stop - start;
-    cout << duration.count() << endl;
-
-    start = std::chrono::high_resolution_clock::now();
-	cout << "- calculating prefix lengths (5)" << endl;
-	vector<int> prefixes = get_prefix_lengths(global_enc_recs, t);
-	cout << prefixes << endl;
-
-	map<vector<Ciphertext<DCRTPoly>>, int> pref_to_id;
-	map<int, vector<Ciphertext<DCRTPoly>>> id_to_pref;
-	for (int k = 0; k < global_enc_recs.size(); k++) {
-		vector<Ciphertext<DCRTPoly>> prefix = {global_enc_recs[k].begin(), global_enc_recs[k].begin() + prefixes[k]};
-		pref_to_id[prefix] = k;
-		id_to_pref[k] = prefix;
-	}
-
-	stop = std::chrono::high_resolution_clock::now();
-    duration = stop - start;
-    cout << duration.count() << endl;
-
-    start = std::chrono::high_resolution_clock::now();
-	cout << "- sorting records by length (6)" << endl;
 	vector<pair<vector<Ciphertext<DCRTPoly>>, int>> lengths;
 	for (int i = 0; i < global_enc_recs.size(); i++) {
 		lengths.push_back(make_pair(global_enc_recs[i], global_enc_recs[i].size()));
 	}
-
-	sort_global(lengths);
-	for (int j = 0; j < global_enc_recs.size(); j++) {
-		global_enc_recs[j] = lengths[j].first;
-		cout << global_enc_recs[j].size() << endl;
-	}
+	map<int, int> rid_mapping;
+	sort_global(lengths, rid_mapping);
 
 	stop = std::chrono::high_resolution_clock::now();
     duration = stop - start;
-    cout << duration.count() << endl;
-
+    cout << duration.count() << " ms" << endl;
 
     start = std::chrono::high_resolution_clock::now();
-	cout << "- inverted index creation + filtering (7)" << endl;
-	vector<vector<int>> matches;
-	map<vector<int>, int> overlaps;
-	map<Ciphertext<DCRTPoly>, vector<int>> inverted_index;
-	for (int i = 0; i < global_enc_recs.size(); i++) {
-		//cout << "checking length filter for rec id: " << i << endl;
-		if (length_filter(global_enc_recs[i].size(), global_enc_recs[i+1].size()) && i != global_enc_recs.size() - 1) {
-			//cout << "length filter for rec id: " << i << " passed" << endl;
+	cout << "- he-ppjoin + he-verify" << endl;
+	set<pair<int, int>> matches;
+	map<Ciphertext<DCRTPoly>, set<pair<int, int>>> inverted_index;
 
-			for (Ciphertext<DCRTPoly> c: id_to_pref[i]) {
-				vector<int> tokens;
-				for (const auto &myPair : inverted_index) {
-					Ciphertext<DCRTPoly> key = myPair.first;
-	        		auto match = cc->EvalSub(c, key);
-	        		Plaintext decryptResult;
-	        		if (is_a_match(cc, kpMultiparty, decryptResult, match)) {
-	        			tokens = inverted_index[key];
-	        			tokens.push_back(i);
-	        			matches.push_back(tokens);
+	#pragma omp for
+	for (int idx = 0; idx < rid_mapping.size(); idx++) {
+		int rid_x = rid_mapping[idx];
+		vector<Ciphertext<DCRTPoly>> x = id_mapping[rid_x];
+		map<int, int> A;
+		int _x_ = x.size();
+		int xp = _x_ - ceil(t * _x_) + 1;
 
-	        			int curr_overlap = overlaps[tokens];
-	        			curr_overlap++;
-	        			overlaps[tokens] = curr_overlap;
-	        			inverted_index[key] = tokens;
+		for (int i = 0; i < xp; i++) {
+			Ciphertext<DCRTPoly> w = x[i];
+			//need to check w against all keys in ii
+			for (auto &ii: inverted_index) {
+				Ciphertext<DCRTPoly> key = ii.first;
+				auto match = cc->EvalSub(w, key);
+        		Plaintext decryptResult;
+        		if (is_a_match(cc, kpMultiparty, decryptResult, match)) {
+        			set<pair<int, int>> ids = inverted_index[key];
+        			for (auto pair: ids) {
+						int rid_y = pair.first;
+						int j = pair.second;
 
-	        			// cout << tokens << endl;
-	        			// cout << curr_overlap << endl;
-	        		} 
-	    		}
-	    		tokens = {i};
-	    		overlaps[tokens] = 1;
-	    		inverted_index[c] = tokens;
+						int _y_ = id_mapping[rid_y].size();
+
+						if (_y_ < (t * _x_)) {
+							continue;
+						}
+
+						int alpha = ceil((t / (1 + t) * (_x_ + _y_)));
+						int ubound = 1 + min(_x_ - i, _y_ - j);
+
+						//cout << A[rid_y] << ", " << "alpha: " << alpha << ", ubound: " << ubound << endl;
+
+						if (A[rid_y] + ubound >= alpha) {
+							A[rid_y] += 1;
+						} else {
+							A[rid_y] = 0;
+						}
+
+					}
+        		}
 
 			}
+
+			set<pair<int, int>> get = inverted_index[w];
+			get.insert(make_pair(rid_x, i));
+			inverted_index[w] = get;
+		}
+
+		for (auto const& pair : A) {
+			int rid_y = pair.first;
+			int overlap = pair.second;
+			vector<Ciphertext<DCRTPoly>> y = id_mapping[rid_y];
+			int _y_ = y.size();
+			int yp = _y_ - ceil(t * _y_) + 1;
+
+			Ciphertext<DCRTPoly> wx = x[xp - 1];
+			Ciphertext<DCRTPoly> wy = y[yp - 1];
+
+
+			int alpha = ceil((t / (1 + t) * (_x_ + _y_)));
+
+			// cout << "comparing rid_x: " << rid_x << ", rid_y: " << rid_y << endl;
+			// cout << "_x_: " << _x_ << ", _y_: " <<  _y_ << endl;
+			// cout << "overlap: " << overlap << ", alpha: " << alpha << endl;  
+
+			int rest = 0; 
+			int ubound = 0;
+
+			int wx_pos = 0;
+			int wy_pos = 0;
+
+			Plaintext decryptResult;
+			for (int k = 0; k < global_enc_freq.size(); k++) {
+				auto is_wx_match = cc->EvalSub(wx, global_enc_freq[k].first);
+				auto is_wy_match = cc->EvalSub(wy, global_enc_freq[k].first);
+				if (is_a_match(cc, kpMultiparty, decryptResult, is_wx_match)) {
+					wx_pos = k;
+				}
+
+				if (is_a_match(cc, kpMultiparty, decryptResult, is_wy_match)) {
+					wy_pos = k;
+				}
+			}
+
+			// cout << "wx_pos: " << wx_pos << ", wy_pos: " << wy_pos << endl;
+
+			if (wx_pos < wy_pos) {
+				ubound = overlap + _x_ - xp;
+				if (ubound >= alpha) {
+					vector<Ciphertext<DCRTPoly>> newx = {x.begin() + (xp), x.end()};
+					vector<Ciphertext<DCRTPoly>> newy = {y.begin() + (overlap), y.end()};
+					rest = private_set_intersection(cc, kpMultiparty, newx, newy);
+				}
+			} else {
+				ubound = overlap + _y_ - yp;
+				if (ubound >= alpha) {
+					vector<Ciphertext<DCRTPoly>> newx = {x.begin() + (overlap), x.end()};
+					vector<Ciphertext<DCRTPoly>> newy = {y.begin() + (yp), y.end()};
+					rest = private_set_intersection(cc, kpMultiparty, newx, newy);
+				}
+			}
+
+			overlap += rest;
+			if (overlap >= alpha) {
+				matches.insert(make_pair(rid_x, rid_y));
+			}
+
 		}
 	}
-
-	for (int i = 0; i < matches.size(); i++) {
-		vector<int> match = matches[i];
-		if (!prefix_filter(id_mapping[match[0]].size(), id_mapping[match[1]].size(), overlaps[match])) {
-			matches.erase(matches.begin() + i);
-		}
-	}
-
-	cout << matches << endl;
 
 	stop = std::chrono::high_resolution_clock::now();
     duration = stop - start;
-    cout << duration.count() << endl;
+    cout << duration.count() << " ms" << endl;
+
+	for (auto match: matches) {
+		cout << "match between p1_id: " << p1_ids[match.first - p2_ids.size()] << ", p2_id: " << p2_ids[match.second - p1_ids.size()] << endl;
+	}
 }
