@@ -23,7 +23,7 @@ void tokenize(std::string const &str, const char delim, std::vector<int> &out) {
     }
 }
 
-vector<vector<int>> read_in_data (string file_to_read, vector<int> &ids) {
+vector<vector<int>> read_in_data (string file_to_read, vector<int> &ids, int offset) {
 	csvstream csvin("../test_data/" + file_to_read);
 	vector<vector<int>> token_set;
 	map<string, string> row;
@@ -31,10 +31,9 @@ vector<vector<int>> read_in_data (string file_to_read, vector<int> &ids) {
 	while (csvin >> row) {
 		string id = row["id"];
 		string data = row["tokens"];
-		data = data.substr(1, data.size() - 2);
-
+		// data = data.substr(1, data.size() - 2);
 		vector<int> tokens;
-		ids.push_back(stoi(id));
+		ids.push_back(stoi(id) + offset);
 		const char delim = ',';
 		tokenize(data, delim, tokens);
 		token_set.push_back(tokens);
@@ -186,7 +185,7 @@ void sort_rec (vector<pair<Ciphertext<DCRTPoly>, int>> &rec) {
 }
 
 void sort_global (vector<pair<vector<Ciphertext<DCRTPoly>>, int>> &global, map<int, int> &rid_mapping) {
-	#pragma omp for
+	#pragma omp for 
 	for (int idx = 0; idx < global.size(); idx++) {
 		int min = 0;
 		for (int jdx = 1; jdx < global.size(); jdx++) {

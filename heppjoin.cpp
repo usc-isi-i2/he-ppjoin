@@ -28,12 +28,24 @@ int main(int argc, char** argv) {
   	gen_multiparty_keys(cc, kp1, kp2, kpMultiparty);
 
   	vector<int> p1_ids;
-	vector<vector<int>> p1 = read_in_data ("ds1_output_0.5.csv", p1_ids);
+	vector<vector<int>> p1 = read_in_data ("ds1_100_0.5.csv", p1_ids, 0);
 	vector<vector<Ciphertext<DCRTPoly>>>  p1_enc_recs;
 
 	vector<int> p2_ids;
-	vector<vector<int>> p2 = read_in_data ("ds2_output_0.5.csv", p2_ids);
+	vector<vector<int>> p2 = read_in_data ("ds2_100_0.5.csv", p2_ids, p1_ids.size());
 	vector<vector<Ciphertext<DCRTPoly>>>  p2_enc_recs;
+
+	vector<int> p_ids = p1_ids;
+	p_ids.insert(p_ids.end(), p2_ids.begin(), p2_ids.end());
+
+	map<int, int> pid_check;
+
+	for (int id: p1_ids) {
+		pid_check[id] = 1;
+	}
+	for (int id: p2_ids) {
+		pid_check[id] = 2;
+	}
 
 	map<int, Ciphertext<DCRTPoly>> p1_enc_map;
 	map<int, Ciphertext<DCRTPoly>> p2_enc_map;
@@ -108,6 +120,13 @@ int main(int argc, char** argv) {
         			set<pair<int, int>> ids = inverted_index[key];
         			for (auto pair: ids) {
 						int rid_y = pair.first;
+
+						//added filter to check if same data owner
+						bool same_owner = pid_check[p_ids[rid_x]] == pid_check[p_ids[rid_y]];
+						if (same_owner) {
+							continue;
+						}
+
 						int j = pair.second;
 
 						int _y_ = id_mapping[rid_y].size();
@@ -204,6 +223,6 @@ int main(int argc, char** argv) {
     cout << duration.count() << " ms" << endl;
 
 	for (auto match: matches) {
-		cout << "match between p1_id: " << p1_ids[match.first - p2_ids.size()] << ", p2_id: " << p2_ids[match.second - p1_ids.size()] << endl;
+		cout << "match between " << p_ids[match.first] << ", " << p_ids[match.second] << endl;
 	}
 }
