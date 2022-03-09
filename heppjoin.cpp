@@ -1,7 +1,7 @@
 #include "palisade.h"
 #include "utility.h"
 
-double t = 0.5; //global var --> similarity threshold
+double t = 0.2; //global var --> similarity threshold
 
 int main(int argc, char** argv) {
 
@@ -28,11 +28,11 @@ int main(int argc, char** argv) {
   	gen_multiparty_keys(cc, kp1, kp2, kpMultiparty);
 
   	vector<int> p1_ids;
-	vector<vector<int>> p1 = read_in_data ("ds1_100_0.5.csv", p1_ids, 0);
+	vector<vector<int>> p1 = read_in_data ("ds1_100_0.2.csv", p1_ids, 0);
 	vector<vector<Ciphertext<DCRTPoly>>>  p1_enc_recs;
 
 	vector<int> p2_ids;
-	vector<vector<int>> p2 = read_in_data ("ds2_100_0.5.csv", p2_ids, p1_ids.size());
+	vector<vector<int>> p2 = read_in_data ("ds2_100_0.2.csv", p2_ids, p1_ids.size());
 	vector<vector<Ciphertext<DCRTPoly>>>  p2_enc_recs;
 
 	vector<int> p_ids = p1_ids;
@@ -91,6 +91,10 @@ int main(int argc, char** argv) {
 	}
 	map<int, int> rid_mapping;
 	sort_global(lengths, rid_mapping);
+
+	for (auto pair: rid_mapping) {
+		cout << pair.first << ", " << pair.second << endl;
+	}
 
 	stop = std::chrono::high_resolution_clock::now();
     duration = stop - start;
