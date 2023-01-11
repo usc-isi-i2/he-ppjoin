@@ -1,4 +1,4 @@
-#include "palisade.h"
+#include "openfhe.h"
 #include "csvstream.h"
 #include <iostream>
 #include <fstream>
@@ -42,12 +42,12 @@ vector<vector<int>> read_in_data (string file_to_read, vector<int> &ids, int off
 	return token_set;
 }
 
-map<int, int> get_local_ordering_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp2, vector<vector<int>> tokens, map<int, Ciphertext<DCRTPoly>> &encrypted_tokens, vector<vector<Ciphertext<DCRTPoly>>> &enc_records) {
+map<int, int> get_local_ordering_freq (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kp2, vector<vector<int>> tokens, map<int, Ciphertext<DCRTPoly>> &encrypted_tokens, vector<vector<Ciphertext<DCRTPoly>>> &enc_records) {
 	map<int, int> freq;
 	#pragma omp for
-	for (int i = 0; i < tokens.size(); i++) {
+	for (int i = 0; i < (int)tokens.size(); i++) {
 		vector<Ciphertext<DCRTPoly>> rec;
-		for (int j = 0; j < tokens[i].size(); j++) {
+		for (int j = 0; j < (int)tokens[i].size(); j++) {
 
 			vector<int64_t> t = {tokens[i][j]};
 			Plaintext p = cc->MakePackedPlaintext(t);
@@ -74,7 +74,7 @@ bool sort_enc_pairs (pair<Ciphertext<DCRTPoly>, int> &a, pair<Ciphertext<DCRTPol
 	return (a.second < b.second);
 }
 
-vector<pair<Ciphertext<DCRTPoly>, int>> encrypt_local_freq (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp2, map<int, int> freq, map<int, Ciphertext<DCRTPoly>> enc_map) {
+vector<pair<Ciphertext<DCRTPoly>, int>> encrypt_local_freq (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kp2, map<int, int> freq, map<int, Ciphertext<DCRTPoly>> enc_map) {
 	vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq;
 
 	map<int, int>::iterator it;
@@ -90,7 +90,7 @@ vector<pair<Ciphertext<DCRTPoly>, int>> encrypt_local_freq (CryptoContext<DCRTPo
 	return enc_freq;
 }
 
-bool is_a_match (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, Plaintext decryptResult, Ciphertext<DCRTPoly> cipher) {
+bool is_a_match (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kpMultiparty, Plaintext decryptResult, Ciphertext<DCRTPoly> cipher) {
     cc->Decrypt(kpMultiparty.secretKey, cipher, &decryptResult);
     if (decryptResult->GetPackedValue()[0] == 0) {
     	return true;
@@ -100,7 +100,7 @@ bool is_a_match (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, P
     
 }
 
-int private_set_intersection (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<Ciphertext<DCRTPoly>> x, vector<Ciphertext<DCRTPoly>> y) {
+int private_set_intersection (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kpMultiparty, vector<Ciphertext<DCRTPoly>> x, vector<Ciphertext<DCRTPoly>> y) {
 	int _x_= x.size();
 	int _y_ = y.size(); 
 
@@ -120,22 +120,22 @@ int private_set_intersection (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp
 
 }
 
-vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq_join (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq1, vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq2) {
+vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq_join (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq1, vector<pair<Ciphertext<DCRTPoly>, int>> enc_freq2) {
 	vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq;
 	set<int> idx;
 	set<int> jdx;
 
 	#pragma omp for
-	for (int i = 0; i < enc_freq1.size(); ++i) 
+	for (int i = 0; i < (int)enc_freq1.size(); ++i) 
     	idx.insert(idx.end(), i);
 
   #pragma omp for
-	for (int j = 0; j < enc_freq2.size(); ++j) 
+	for (int j = 0; j < (int)enc_freq2.size(); ++j) 
 		jdx.insert(jdx.end(), j);
 
   #pragma omp for
-	for (int i = 0; i < enc_freq1.size(); i++) {
-		for (int j = 0; j < enc_freq2.size(); j++) {
+	for (int i = 0; i < (int)enc_freq1.size(); i++) {
+		for (int j = 0; j < (int)enc_freq2.size(); j++) {
 			pair<Ciphertext<DCRTPoly>, int> p1 = enc_freq1[i];
 			pair<Ciphertext<DCRTPoly>, int> p2 = enc_freq2[j];
 
@@ -164,8 +164,8 @@ vector<pair<Ciphertext<DCRTPoly>, int>> doc_freq_join (CryptoContext<DCRTPoly> c
 
 }
 
-int get_token_pos (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> map, Ciphertext<DCRTPoly> c) {
-	for (int i = 0; i < map.size(); i++) {
+int get_token_pos (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kpMultiparty, vector<pair<Ciphertext<DCRTPoly>, int>> map, Ciphertext<DCRTPoly> c) {
+	for (int i = 0; i < (int)map.size(); i++) {
 		auto sub = cc->EvalSub(map[i].first, c);
 		Plaintext decryptResult;
 		if (is_a_match(cc, kpMultiparty, decryptResult, sub)) {
@@ -186,9 +186,9 @@ void sort_rec (vector<pair<Ciphertext<DCRTPoly>, int>> &rec) {
 
 void sort_global (vector<pair<vector<Ciphertext<DCRTPoly>>, int>> &global, map<int, int> &rid_mapping) {
 	#pragma omp for 
-	for (int idx = 0; idx < global.size(); idx++) {
+	for (int idx = 0; idx < (int)global.size(); idx++) {
 		int min = 0;
-		for (int jdx = 1; jdx < global.size(); jdx++) {
+		for (int jdx = 1; jdx < (int)global.size(); jdx++) {
 			if (global[min].second > global[jdx].second) {
 				min = jdx;
 			}
@@ -202,6 +202,7 @@ void sort_global (vector<pair<vector<Ciphertext<DCRTPoly>>, int>> &global, map<i
 
 CryptoContext<DCRTPoly> gen_crypto_context (int plaintextModulus, double sigma, int depth) {
 
+/*
 	// Instantiate the BGVrns crypto context
   CryptoContext<DCRTPoly> cc =
       CryptoContextFactory<DCRTPoly>::genCryptoContextBGVrns(
@@ -212,14 +213,29 @@ CryptoContext<DCRTPoly> gen_crypto_context (int plaintextModulus, double sigma, 
   cc->Enable(SHE);
   cc->Enable(MULTIPARTY);
 
-	return cc;
+	return cc;*/
+
+	CCParams<CryptoContextBGVRNS> parameters;
+    parameters.SetMultiplicativeDepth(depth);
+    parameters.SetPlaintextModulus(plaintextModulus);
+    parameters.SetMaxRelinSkDeg(depth);
+
+    CryptoContext<DCRTPoly> cryptoContext = GenCryptoContext(parameters);
+    // enable features that you wish to use
+    cryptoContext->Enable(PKE);
+    //cryptoContext->Enable(KEYSWITCH);
+    cryptoContext->Enable(LEVELEDSHE);
+    cryptoContext->Enable(ADVANCEDSHE);
+  	cryptoContext->Enable(MULTIPARTY);
+
+    return cryptoContext;
 
 }
 
-void gen_multiparty_keys (CryptoContext<DCRTPoly> cc, LPKeyPair<DCRTPoly> kp1, LPKeyPair<DCRTPoly> kp2, LPKeyPair<DCRTPoly> kpMultiparty) {
+void gen_multiparty_keys (CryptoContext<DCRTPoly> cc, KeyPair<DCRTPoly> kp1, KeyPair<DCRTPoly> kp2, KeyPair<DCRTPoly> kpMultiparty) {
 
 		 cc->EvalSumKeyGen(kp1.secretKey);
-    auto evalSumKeys = std::make_shared<std::map<usint, LPEvalKey<DCRTPoly>>>(
+    auto evalSumKeys = std::make_shared<std::map<usint, EvalKey<DCRTPoly>>>(
     	cc->GetEvalSumKeyMap(kp1.secretKey->GetKeyTag()));
 
 

@@ -1,11 +1,14 @@
-#include "palisade.h"
+#include "openfhe.h"
 #include "utility.h"
 
 double t = 0.2; //global var --> similarity threshold
 
 int main(int argc, char** argv) {
 
-	auto start = std::chrono::high_resolution_clock::now();
+	// auto start = std::chrono::high_resolution_clock::now();
+    TimeVar tv;
+    double processingTime(0.0);
+	TIC(tv);
 	cout << "- local pre-processing" << endl;
 
 	int plaintextModulus = 65537;
@@ -14,14 +17,14 @@ int main(int argc, char** argv) {
 
 	CryptoContext<DCRTPoly> cc = gen_crypto_context(plaintextModulus, sigma, depth);
 
-	LPKeyPair<DCRTPoly> kp1;
- 	LPKeyPair<DCRTPoly> kp2;
+	KeyPair<DCRTPoly> kp1;
+ 	KeyPair<DCRTPoly> kp2;
 
-  	LPKeyPair<DCRTPoly> kpMultiparty;
+  	KeyPair<DCRTPoly> kpMultiparty;
 
   	kp1 = cc->KeyGen();
   	kp2 = cc->MultipartyKeyGen(kp1.publicKey);
-  	vector<LPPrivateKey<DCRTPoly>> secretKeys;
+  	vector<PrivateKey<DCRTPoly>> secretKeys;
   	secretKeys.push_back(kp1.secretKey);
   	secretKeys.push_back(kp2.secretKey);
   	kpMultiparty = cc->MultipartyKeyGen(secretKeys);
@@ -46,7 +49,6 @@ int main(int argc, char** argv) {
 	for (int id: p2_ids) {
 		pid_check[id] = 2;
 	}
-
 	map<int, Ciphertext<DCRTPoly>> p1_enc_map;
 	map<int, Ciphertext<DCRTPoly>> p2_enc_map;
 
@@ -56,11 +58,14 @@ int main(int argc, char** argv) {
 	map<int, int> p2_local_freq = get_local_ordering_freq (cc, kp2, p2, p2_enc_map, p2_enc_recs);
 	vector<pair<Ciphertext<DCRTPoly>, int>> p2_enc_freq = encrypt_local_freq (cc, kp2, p2_local_freq, p2_enc_map);
 
-	auto stop = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> duration = stop - start;
-    cout << duration.count()  << " ms" << endl;
+	// auto stop = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> duration = stop - start;
+    // cout << duration.count()  << " ms" << endl;
+    processingTime = TOC(tv);
+    cout << processingTime  << " ms" << endl;
 
-    start = std::chrono::high_resolution_clock::now();
+    //start = std::chrono::high_resolution_clock::now();
+	TIC(tv);
 	cout << "- global pre-processing" << endl;
 	vector<pair<Ciphertext<DCRTPoly>, int>> global_enc_freq = doc_freq_join (cc, kpMultiparty, p1_enc_freq, p2_enc_freq);
 
@@ -69,16 +74,16 @@ int main(int argc, char** argv) {
 	vector<vector<Ciphertext<DCRTPoly>>> global_enc_recs = p1_enc_recs;
 	global_enc_recs.insert(global_enc_recs.end(), p2_enc_recs.begin(), p2_enc_recs.end());
 
-	for (int i = 0; i < global_enc_recs.size(); i++) {
+	for (int i = 0; i < (int)global_enc_recs.size(); i++) {
 		vector<pair<Ciphertext<DCRTPoly>, int>> positions;
-		for (int j = 0; j < global_enc_recs[i].size(); j++) {
+		for (int j = 0; j < (int)global_enc_recs[i].size(); j++) {
 			int pos = get_token_pos(cc, kpMultiparty, global_enc_freq, global_enc_recs[i][j]);
 			positions.push_back(make_pair(global_enc_recs[i][j], pos));
 		}
 
 		sort_rec(positions);
 
-		for (int k = 0; k < positions.size(); k++) {
+		for (int k = 0; k < (int)positions.size(); k++) {
 			global_enc_recs[i][k] = positions[k].first;
 		}
 
@@ -86,7 +91,7 @@ int main(int argc, char** argv) {
 	}
 
 	vector<pair<vector<Ciphertext<DCRTPoly>>, int>> lengths;
-	for (int i = 0; i < global_enc_recs.size(); i++) {
+	for (int i = 0; i < (int)global_enc_recs.size(); i++) {
 		lengths.push_back(make_pair(global_enc_recs[i], global_enc_recs[i].size()));
 	}
 	map<int, int> rid_mapping;
@@ -96,17 +101,21 @@ int main(int argc, char** argv) {
 		cout << pair.first << ", " << pair.second << endl;
 	}
 
-	stop = std::chrono::high_resolution_clock::now();
-    duration = stop - start;
-    cout << duration.count() << " ms" << endl;
+	//stop = std::chrono::high_resolution_clock::now();
+    //duration = stop - start;
+    //cout << duration.count() << " ms" << endl;
+    processingTime = TOC(tv);
+    cout << processingTime  << " ms" << endl;
 
-    start = std::chrono::high_resolution_clock::now();
+
+	TIC(tv);
+    //start = std::chrono::high_resolution_clock::now();
 	cout << "- he-ppjoin + he-verify" << endl;
 	set<pair<int, int>> matches;
 	map<Ciphertext<DCRTPoly>, set<pair<int, int>>> inverted_index;
 
 	#pragma omp for
-	for (int idx = 0; idx < rid_mapping.size(); idx++) {
+	for (int idx = 0; idx < (int)rid_mapping.size(); idx++) {
 		int rid_x = rid_mapping[idx];
 		vector<Ciphertext<DCRTPoly>> x = id_mapping[rid_x];
 		map<int, int> A;
@@ -184,7 +193,7 @@ int main(int argc, char** argv) {
 			int wy_pos = 0;
 
 			Plaintext decryptResult;
-			for (int k = 0; k < global_enc_freq.size(); k++) {
+			for (int k = 0; k < (int)global_enc_freq.size(); k++) {
 				auto is_wx_match = cc->EvalSub(wx, global_enc_freq[k].first);
 				auto is_wy_match = cc->EvalSub(wy, global_enc_freq[k].first);
 				if (is_a_match(cc, kpMultiparty, decryptResult, is_wx_match)) {
@@ -222,9 +231,11 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	stop = std::chrono::high_resolution_clock::now();
-    duration = stop - start;
-    cout << duration.count() << " ms" << endl;
+	//stop = std::chrono::high_resolution_clock::now();
+    //duration = stop - start;
+    //cout << duration.count() << " ms" << endl;
+    processingTime = TOC(tv);
+    cout << processingTime  << " ms" << endl;
 
 	for (auto match: matches) {
 		cout << "match between " << p_ids[match.first] << ", " << p_ids[match.second] << endl;
